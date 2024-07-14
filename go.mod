@@ -1,3 +1,3 @@
-module github.com/aayush993/hotspot-tracker
+module github.com/aayush993/htracker
 
 go 1.22.4
