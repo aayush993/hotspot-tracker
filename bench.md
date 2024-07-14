@@ -1,5 +1,6 @@
 #### Min Heap
 
+``` bash
 \hotspot-tracker> go test -bench .
 goos: windows
 goarch: amd64
@@ -13,9 +14,11 @@ BenchmarkEnhancedConcurrentAccess-4        10000            144679 ns/op        
 PASS
 ok      github.com/aayush993/hotspot-tracker    12.383s
 
+```
 
 #### After Sharding
 
+``` bash
 \hotspot-tracker> go test -bench .
 goos: windows
 goarch: amd64
@@ -29,3 +32,4 @@ BenchmarkEnhancedConcurrentAccessSharded-4          2763            416489 ns/op
 PASS
 ok      github.com/aayush993/hotspot-tracker    15.355s
 PS C:\Users\aayus\OneDrive\Desktop\git\hotspot-tracker> 
+```
