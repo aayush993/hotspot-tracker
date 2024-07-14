@@ -59,24 +59,6 @@ type HotspotTracker struct {
 	withCache bool
 }
 
-// shard represents a shard of the hotspot tracker
-type shard struct {
-	topN     int
-	minHeap  MinHeap
-	keyFreqs map[string]*KeyFreq
-	mu       sync.RWMutex
-}
-
-func NewShard(n int) *shard {
-	h := &MinHeap{}
-	heap.Init(h)
-	return &shard{
-		topN:     n,
-		minHeap:  *h,
-		keyFreqs: make(map[string]*KeyFreq),
-	}
-}
-
 // NewHotspotTracker initializes a new HotspotTracker with multiple shards
 func NewHotspotTracker(topN, numShards int) *HotspotTracker {
 	shards := make([]*shard, numShards)
@@ -184,6 +166,24 @@ func (ht *HotspotTracker) IsHotspot(key string) bool {
 	return aggregateShard.IsHotspot(key)
 }
 
+// shard represents a shard of the hotspot tracker
+type shard struct {
+	topN     int
+	minHeap  MinHeap
+	keyFreqs map[string]*KeyFreq
+	mu       sync.RWMutex
+}
+
+func NewShard(n int) *shard {
+	h := &MinHeap{}
+	heap.Init(h)
+	return &shard{
+		topN:     n,
+		minHeap:  *h,
+		keyFreqs: make(map[string]*KeyFreq),
+	}
+}
+
 // RecordRequest records a request with a given key in a shard
 func (s *shard) RecordRequest(key string) {
 	s.mu.Lock()
@@ -196,19 +196,6 @@ func (s *shard) RecordRequest(key string) {
 		kf = &KeyFreq{Key: key, Frequency: 1}
 
 		processKeyFreq(s, kf)
-	}
-}
-
-func processKeyFreq(tShard *shard, kf *KeyFreq) {
-
-	if len(tShard.minHeap) < tShard.topN {
-		heap.Push(&tShard.minHeap, kf)
-		tShard.keyFreqs[kf.Key] = kf
-	} else if tShard.minHeap[0].Frequency <= kf.Frequency {
-		minKey := heap.Pop(&tShard.minHeap).(*KeyFreq)
-		delete(tShard.keyFreqs, minKey.Key)
-		heap.Push(&tShard.minHeap, kf)
-		tShard.keyFreqs[kf.Key] = kf
 	}
 }
 
@@ -236,4 +223,19 @@ func (s *shard) IsHotspot(key string) bool {
 
 	_, exists := s.keyFreqs[key]
 	return exists
+}
+
+// helper functions
+
+func processKeyFreq(tShard *shard, kf *KeyFreq) {
+
+	if len(tShard.minHeap) < tShard.topN {
+		heap.Push(&tShard.minHeap, kf)
+		tShard.keyFreqs[kf.Key] = kf
+	} else if tShard.minHeap[0].Frequency <= kf.Frequency {
+		minKey := heap.Pop(&tShard.minHeap).(*KeyFreq)
+		delete(tShard.keyFreqs, minKey.Key)
+		heap.Push(&tShard.minHeap, kf)
+		tShard.keyFreqs[kf.Key] = kf
+	}
 }
