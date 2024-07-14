@@ -71,6 +71,7 @@ func TestHotspotTrackerEnhancedConcurrency(t *testing.T) {
 	}
 	wg.Wait()
 
+	fmt.Println(ht.GetHotspots())
 	if len(ht.GetHotspots()) != 10 {
 		t.Error("expected 10 hotspots")
 	}

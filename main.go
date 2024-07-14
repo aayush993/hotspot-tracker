@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sync"
+	"time"
 )
 
 // KeyFreq holds the key and its frequency
@@ -52,7 +53,11 @@ type HotspotTracker struct {
 	shards    []*shard
 	numShards int
 	topN      int
+	cache     *shard
 	mu        sync.RWMutex
+	update    bool
+	stop      chan struct{}
+	withCache bool
 }
 
 // shard represents a shard of the hotspot tracker
@@ -79,10 +84,39 @@ func NewHotspotTracker(topN, numShards int) *HotspotTracker {
 	for i := 0; i < numShards; i++ {
 		shards[i] = NewShard(topN)
 	}
+
 	return &HotspotTracker{
 		shards:    shards,
 		numShards: numShards,
 		topN:      topN,
+	}
+}
+
+func (ht *HotspotTracker) WithCache(interval time.Duration) *HotspotTracker {
+	ht.cache = NewShard(ht.topN)
+	ht.update = true
+	ht.stop = make(chan struct{})
+	ht.withCache = true
+	ht.startTicker(interval)
+	return ht
+}
+
+func (ht *HotspotTracker) startTicker(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				ht.update = true
+			case <-ht.stop:
+				return
+			}
+		}
+	}()
+}
+func (ht *HotspotTracker) Close() {
+	if ht.withCache {
+		close(ht.stop)
 	}
 }
 
@@ -108,35 +142,52 @@ func (ht *HotspotTracker) GetHotspots() []string {
 }
 
 func (ht *HotspotTracker) AggregateData() *shard {
-	// Create a temporary shard for aggregation
 	ht.mu.RLock()
-	tShard := NewShard(ht.topN)
-	ht.mu.RUnlock()
+	defer ht.mu.RUnlock()
 
-	// Aggregate data from each shard
+	var tShard *shard
+
+	if ht.withCache {
+		ht.mu.Lock()
+		defer ht.mu.Unlock()
+
+		if ht.update {
+			tShard = ht.aggregateShards()
+			ht.cache = tShard
+			ht.update = false
+		}
+		return ht.cache
+	}
+
+	tShard = ht.aggregateShards()
+	return tShard
+}
+
+func (ht *HotspotTracker) aggregateShards() *shard {
+	tShard := NewShard(ht.topN)
+
 	for _, shard := range ht.shards {
 		shard.mu.RLock()
-		//fmt.Println("shard", shard.minHeap)
 		for _, kf := range shard.minHeap {
-			//fmt.Println(kf)
-
-			item := &KeyFreq{Key: kf.Key, Frequency: kf.Frequency}
-			if len(tShard.minHeap) < tShard.topN {
-				heap.Push(&tShard.minHeap, item)
-				tShard.keyFreqs[kf.Key] = item
-			} else if tShard.minHeap[0].Frequency <= kf.Frequency {
-
-				minKey := heap.Pop(&tShard.minHeap).(*KeyFreq)
-				delete(tShard.keyFreqs, minKey.Key)
-
-				heap.Push(&tShard.minHeap, kf)
-				tShard.keyFreqs[kf.Key] = item
-			}
+			processKeyFreq(tShard, kf)
 		}
 		shard.mu.RUnlock()
 	}
 
 	return tShard
+}
+
+func processKeyFreq(tShard *shard, kf *KeyFreq) {
+
+	if len(tShard.minHeap) < tShard.topN {
+		heap.Push(&tShard.minHeap, kf)
+		tShard.keyFreqs[kf.Key] = kf
+	} else if tShard.minHeap[0].Frequency <= kf.Frequency {
+		minKey := heap.Pop(&tShard.minHeap).(*KeyFreq)
+		delete(tShard.keyFreqs, minKey.Key)
+		heap.Push(&tShard.minHeap, kf)
+		tShard.keyFreqs[kf.Key] = kf
+	}
 }
 
 // IsHotspot checks if a given key is a hotspot across all shards
@@ -158,17 +209,7 @@ func (s *shard) RecordRequest(key string) {
 	} else {
 		kf = &KeyFreq{Key: key, Frequency: 1}
 
-		if len(s.minHeap) < s.topN {
-			heap.Push(&s.minHeap, kf)
-			s.keyFreqs[key] = kf // Only add to map if added to heap
-		} else if s.minHeap[0].Frequency <= kf.Frequency {
-			// Remove the minimum element from the heap and the map
-			minKey := heap.Pop(&s.minHeap).(*KeyFreq)
-			delete(s.keyFreqs, minKey.Key)
-			// Add the new element to the heap and map
-			heap.Push(&s.minHeap, kf)
-			s.keyFreqs[key] = kf // Only add to map if added to heap
-		}
+		processKeyFreq(s, kf)
 	}
 }
 
@@ -201,16 +242,19 @@ func (s *shard) IsHotspot(key string) bool {
 
 // Example usage
 func main() {
-	ht := NewHotspotTracker(4, 4) // Example with 4 shards
+	ht := NewHotspotTracker(4, 4)
+	//ht := NewHotspotTracker(4, 4).WithCache(1 * time.Microsecond)
+	fmt.Println("debug1")
+	defer ht.Close()
 
-	testKeys := []string{"a", "b", "c", "x", "y", "z", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e", "a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e", "a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e", "a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e"}
+	//testKeys := []string{"a", "b", "c", "x", "y", "z", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e", "a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e", "a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e", "a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e"}
 
-	//keys := []string{"a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e"}
+	keys := []string{"a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e"}
 
-	keys := []string{}
-	for i := 0; i < 1000000; i++ {
-		keys = append(keys, testKeys...)
-	}
+	// keys := []string{}
+	// for i := 0; i < 1000000; i++ {
+	// 	keys = append(keys, testKeys...)
+	// }
 
 	for _, key := range keys {
 		ht.RecordRequest(key)
@@ -221,4 +265,5 @@ func main() {
 	fmt.Println("Is 'b' a hotspot?", ht.IsHotspot("b"))
 	fmt.Println("Is 'e' a hotspot?", ht.IsHotspot("e"))
 	fmt.Println("Is 'f' a hotspot?", ht.IsHotspot("f"))
+
 }
