@@ -176,19 +176,6 @@ func (ht *HotspotTracker) aggregateShards() *shard {
 	return tShard
 }
 
-func processKeyFreq(tShard *shard, kf *KeyFreq) {
-
-	if len(tShard.minHeap) < tShard.topN {
-		heap.Push(&tShard.minHeap, kf)
-		tShard.keyFreqs[kf.Key] = kf
-	} else if tShard.minHeap[0].Frequency <= kf.Frequency {
-		minKey := heap.Pop(&tShard.minHeap).(*KeyFreq)
-		delete(tShard.keyFreqs, minKey.Key)
-		heap.Push(&tShard.minHeap, kf)
-		tShard.keyFreqs[kf.Key] = kf
-	}
-}
-
 // IsHotspot checks if a given key is a hotspot across all shards
 func (ht *HotspotTracker) IsHotspot(key string) bool {
 
@@ -209,6 +196,19 @@ func (s *shard) RecordRequest(key string) {
 		kf = &KeyFreq{Key: key, Frequency: 1}
 
 		processKeyFreq(s, kf)
+	}
+}
+
+func processKeyFreq(tShard *shard, kf *KeyFreq) {
+
+	if len(tShard.minHeap) < tShard.topN {
+		heap.Push(&tShard.minHeap, kf)
+		tShard.keyFreqs[kf.Key] = kf
+	} else if tShard.minHeap[0].Frequency <= kf.Frequency {
+		minKey := heap.Pop(&tShard.minHeap).(*KeyFreq)
+		delete(tShard.keyFreqs, minKey.Key)
+		heap.Push(&tShard.minHeap, kf)
+		tShard.keyFreqs[kf.Key] = kf
 	}
 }
 
