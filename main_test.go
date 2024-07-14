@@ -5,12 +5,12 @@ import (
 	"math/rand"
 	"sync"
 	"testing"
-	"time"
 )
 
 // TestHotspotTracker tests the functionality of the HotspotTracker.
 func TestHotspotTracker(t *testing.T) {
-	ht := NewHotspotTracker(3)
+
+	ht := NewHotspotTracker(3, 2)
 
 	// Record requests
 	keys := []string{"a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e"}
@@ -49,14 +49,81 @@ func TestHotspotTracker(t *testing.T) {
 	}
 }
 
+func TestHotspotTrackerEnhancedConcurrency(t *testing.T) {
+	ht := NewHotspotTracker(10, 4)
+	keys := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 1000; j++ {
+				key := keys[rand.Intn(len(keys))]
+				ht.RecordRequest(key)
+				if rand.Intn(2) == 0 {
+					ht.IsHotspot(key)
+				} else {
+					ht.GetHotspots()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	if len(ht.GetHotspots()) != 10 {
+		t.Error("expected 10 hotspots")
+	}
+}
+
+func TestHotspotTrackerEdgeCases(t *testing.T) {
+	// Empty tracker
+	ht := NewHotspotTracker(3, 4)
+	hotspots := ht.GetHotspots()
+	if len(hotspots) != 0 {
+		t.Errorf("expected 0 hotspots, got %d", len(hotspots))
+	}
+
+	// Single key
+	ht.RecordRequest("a")
+	hotspots = ht.GetHotspots()
+	if len(hotspots) != 1 || hotspots[0] != "a" {
+		t.Errorf("expected ['a'], got %v", hotspots)
+	}
+
+	// More keys than topN
+	keys := []string{"a", "b", "c", "d", "e", "f"}
+	for _, key := range keys {
+		ht.RecordRequest(key)
+	}
+
+	expected := []string{"c", "d", "a"}
+	actual := ht.GetHotspots()
+	if len(actual) != 3 {
+		t.Errorf("expected 3 hotspots, got %d", len(actual))
+	}
+	for i, key := range expected {
+		if actual[i] != key {
+			t.Errorf("expected %s, got %s", key, actual[i])
+		}
+	}
+}
+
+func generateKey() string {
+	randomChar := rand.Intn(26) // Generates a random integer in [0, 25]
+	return fmt.Sprintf("a%d", randomChar)
+
+}
+
 // BenchmarkRecordRequest benchmarks the RecordRequest method.
 func BenchmarkRecordRequest(b *testing.B) {
-	ht := NewHotspotTracker(100)
+
+	ht := NewHotspotTracker(100, 4)
 
 	// Generate a large number of keys for benchmarking
 	keys := make([]string, b.N*100)
 	for i := 0; i < b.N*100; i++ {
-		keys[i] = fmt.Sprintf("a%d", (i % 26)) // Cycle through 'a' to 'z'
+		keys[i] = generateKey()
 	}
 
 	b.ResetTimer()
@@ -64,15 +131,17 @@ func BenchmarkRecordRequest(b *testing.B) {
 	for i := 0; i < b.N*100; i++ {
 		ht.RecordRequest(keys[i])
 	}
+
+	ht.GetHotspots()
 }
 
 // BenchmarkGetHotspots benchmarks the GetHotspots method.
 func BenchmarkGetHotspots(b *testing.B) {
-	ht := NewHotspotTracker(100)
+	ht := NewHotspotTracker(100, 4)
 
 	// Pre-populate the tracker with a large number of requests
 	for i := 0; i < 1000000; i++ {
-		ht.RecordRequest(fmt.Sprintf("a%d", (i % 26)))
+		ht.RecordRequest(generateKey())
 	}
 
 	b.ResetTimer()
@@ -83,12 +152,12 @@ func BenchmarkGetHotspots(b *testing.B) {
 }
 
 func BenchmarkIsHotspot(b *testing.B) {
-	ht := NewHotspotTracker(100)
+	ht := NewHotspotTracker(100, 4)
 
 	// Pre-populate the tracker with a large number of requests
 	inputs := []string{}
 	for i := 0; i < 1000000; i++ {
-		inputs = append(inputs, fmt.Sprintf("a%d", (i%26)))
+		inputs = append(inputs, generateKey())
 
 	}
 
@@ -104,50 +173,25 @@ func BenchmarkIsHotspot(b *testing.B) {
 	}
 }
 
-const (
-	numConcurrentGoroutines = 100
-	numKeys                 = 1000
-)
+func BenchmarkRecordRequestConcurrentAccess(b *testing.B) {
+	ht := NewHotspotTracker(100, 4)
+	keys := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
 
-// Helper function to generate random keys
-func generateKeys(n int) []string {
-	keys := make([]string, n)
-	for i := 0; i < n; i++ {
-		keys[i] = fmt.Sprintf("key%d", i)
-	}
-	return keys
-}
-
-func BenchmarkConcurrentAccess(b *testing.B) {
-	ht := NewHotspotTracker(100)
-
-	// Generate a large number of keys for benchmarking
-	keys := generateKeys(numKeys)
-
-	// Function to simulate concurrent RecordRequest and GetHotspots
-	runConcurrentAccess := func(wg *sync.WaitGroup) {
-		defer wg.Done()
-		rand.Seed(time.Now().UnixNano())
-		for i := 0; i < b.N; i++ {
-			key := keys[rand.Intn(numKeys)]
-			ht.RecordRequest(key)
-			ht.GetHotspots()
-		}
-	}
-
-	// Start multiple goroutines to simulate concurrent access
 	b.ResetTimer()
 	b.ReportAllocs()
 	var wg sync.WaitGroup
-	wg.Add(numConcurrentGoroutines)
-	for i := 0; i < numConcurrentGoroutines; i++ {
-		go runConcurrentAccess(&wg)
+	for i := 0; i < b.N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ht.RecordRequest(keys[rand.Intn(len(keys))])
+		}()
 	}
 	wg.Wait()
 }
 
-func BenchmarkEnhancedConcurrentAccess(b *testing.B) {
-	ht := NewHotspotTracker(10)
+func BenchmarkEnhancedConcurrentAccessSharded(b *testing.B) {
+	ht := NewHotspotTracker(10, 4) // Example with 4 shards
 	keys := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
 
 	b.ResetTimer()
@@ -169,5 +213,4 @@ func BenchmarkEnhancedConcurrentAccess(b *testing.B) {
 		}()
 	}
 	wg.Wait()
-
 }
