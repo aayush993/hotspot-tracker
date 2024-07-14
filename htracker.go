@@ -1,8 +1,7 @@
-package main
+package htracker
 
 import (
 	"container/heap"
-	"fmt"
 	"hash/fnv"
 	"sync"
 	"time"
@@ -52,9 +51,9 @@ func (h *MinHeap) Pop() interface{} {
 type HotspotTracker struct {
 	shards    []*shard
 	numShards int
+	mu        sync.RWMutex
 	topN      int
 	cache     *shard
-	mu        sync.RWMutex
 	update    bool
 	stop      chan struct{}
 	withCache bool
@@ -224,7 +223,6 @@ func (s *shard) GetHotspots() []string {
 	// Extract elements from the min heap in sorted order of frequency
 	for i := range minHeapCopy {
 		kf := heap.Pop(&minHeapCopy).(*KeyFreq)
-		//fmt.Println(kf)
 		hotspots[i] = kf.Key
 	}
 
@@ -238,32 +236,4 @@ func (s *shard) IsHotspot(key string) bool {
 
 	_, exists := s.keyFreqs[key]
 	return exists
-}
-
-// Example usage
-func main() {
-	ht := NewHotspotTracker(4, 4)
-	//ht := NewHotspotTracker(4, 4).WithCache(1 * time.Microsecond)
-	fmt.Println("debug1")
-	defer ht.Close()
-
-	//testKeys := []string{"a", "b", "c", "x", "y", "z", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e", "a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e", "a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e", "a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e"}
-
-	keys := []string{"a", "b", "c", "a", "a", "b", "d", "d", "d", "d", "e", "f", "e"}
-
-	// keys := []string{}
-	// for i := 0; i < 1000000; i++ {
-	// 	keys = append(keys, testKeys...)
-	// }
-
-	for _, key := range keys {
-		ht.RecordRequest(key)
-	}
-
-	fmt.Println("Hotspots:", ht.GetHotspots())
-	fmt.Println("Is 'a' a hotspot?", ht.IsHotspot("a"))
-	fmt.Println("Is 'b' a hotspot?", ht.IsHotspot("b"))
-	fmt.Println("Is 'e' a hotspot?", ht.IsHotspot("e"))
-	fmt.Println("Is 'f' a hotspot?", ht.IsHotspot("f"))
-
 }
